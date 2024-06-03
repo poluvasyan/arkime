@@ -16,6 +16,24 @@ extern uint8_t    arkime_char_to_hexstr[256][3];
 LOCAL GChecksum *checksums[ARKIME_MAX_PACKET_THREADS];
 LOCAL uint32_t tls_process_certificate_wInfo_func;
 
+
+//  ███▄ ▄███▓▓██   ██▓    ▄████▄   ▒█████  ▓█████▄ ▓█████ 
+// ▓██▒▀█▀ ██▒ ▒██  ██▒   ▒██▀ ▀█  ▒██▒  ██▒▒██▀ ██▌▓█   ▀ 
+// ▓██    ▓██░  ▒██ ██░   ▒▓█    ▄ ▒██░  ██▒░██   █▌▒███   
+// ▒██    ▒██   ░ ▐██▓░   ▒▓▓▄ ▄██▒▒██   ██░░▓█▄   ▌▒▓█  ▄ 
+// ▒██▒   ░██▒  ░ ██▒▓░   ▒ ▓███▀ ░░ ████▓▒░░▒████▓ ░▒████▒
+// ░ ▒░   ░  ░   ██▒▒▒    ░ ░▒ ▒  ░░ ▒░▒░▒░  ▒▒▓  ▒ ░░ ▒░ ░
+// ░  ░      ░ ▓██ ░▒░      ░  ▒     ░ ▒ ▒░  ░ ▒  ▒  ░ ░  ░
+// ░      ░    ▒ ▒ ░░     ░        ░ ░ ░ ▒   ░ ░  ░    ░   
+//        ░    ░ ░        ░ ░          ░ ░     ░       ░  ░
+//             ░ ░        ░                  ░             
+//
+// later will be surrounded by this lines:
+//^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+// *code*
+//#######################################################################
+
+
 /******************************************************************************/
 /*
  * Certs Info
@@ -542,6 +560,12 @@ LOCAL uint32_t certinfo_process_server_certificate(ArkimeSession_t *session, con
         }
         certs->notAfter = arkime_parsers_asn_parse_time(session, atag, value, alen);
 
+        // Check if the certificate is expired
+        time_t currentTime = time(NULL);
+        if (certs->notAfter < currentTime) {
+            arkime_session_add_tag(session, "cert:expired");
+        }
+
         /* subject */
         if (!(value = arkime_parsers_asn_get_tlv(&bsb, &apc, &atag, &alen))) {
             badreason = 8;
@@ -570,10 +594,12 @@ LOCAL uint32_t certinfo_process_server_certificate(ArkimeSession_t *session, con
         }
 
         // no previous certs AND not a CA AND either no orgName or the same orgName AND the same 1 commonName
+        
         if (!session->fields[certsField] &&
             !certs->isCA &&
-            ((certs->subject.orgName.s_count == 1 && certs->issuer.orgName.s_count == 1 && strcmp(certs->subject.orgName.s_next->str, certs->issuer.orgName.s_next->str) == 0) ||
-             (certs->subject.orgName.s_count == 0 && certs->issuer.orgName.s_count == 0)) &&
+            ((certs->subject.orgName.s_count == 1 && certs->issuer.orgName.s_count == 1 && 
+            strcmp(certs->subject.orgName.s_next->str, certs->issuer.orgName.s_next->str) == 0) ||
+            (certs->subject.orgName.s_count == 0 && certs->issuer.orgName.s_count == 0)) &&
             certs->subject.commonName.s_count == 1 &&
             certs->issuer.commonName.s_count == 1 &&
             strcmp(certs->subject.commonName.s_next->str, certs->issuer.commonName.s_next->str) == 0) {
@@ -584,7 +610,6 @@ LOCAL uint32_t certinfo_process_server_certificate(ArkimeSession_t *session, con
         if (certs->isCA) {
             arkime_session_add_tag(session, "cert:certificate-authority");
         }
-
 
         if (!arkime_field_object_add(certsField, session, fobject, clen * 2)) {
             certinfo_free(fobject);
@@ -602,6 +627,55 @@ LOCAL uint32_t certinfo_process_server_certificate(ArkimeSession_t *session, con
 bad_cert:
         if (config.debug)
             LOG("bad cert %d - %d", badreason, clen);
+
+       // Add corresponding tag for the type of bad certificate
+        switch (badreason) {
+            case 1:
+                // Failed to parse the entire certificate structure
+                arkime_session_add_tag(session, "cert:parse-failure");
+                break;
+            case 2:
+                // Failed to parse the signed certificate portion
+                arkime_session_add_tag(session, "cert:signed-cert-failure");
+                break;
+            case 3:
+                // Failed to parse the serial number or version field
+                arkime_session_add_tag(session, "cert:serial-number-failure");
+                break;
+            case 4:
+                // Failed to parse the serial number (after parsing version)
+                arkime_session_add_tag(session, "cert:serial-number-failure");
+                break;
+            case 5:
+                // Failed to parse the signature algorithm identifier
+                arkime_session_add_tag(session, "cert:signature-failure");
+                break;
+            case 6:
+                // Failed to parse the issuer's distinguished name
+                arkime_session_add_tag(session, "cert:issuer-failure");
+                break;
+            case 7:
+                // Failed to parse the validity period
+                arkime_session_add_tag(session, "cert:validity-failure");
+                break;
+            case 8:
+                // Failed to parse the subject's distinguished name
+                arkime_session_add_tag(session, "cert:subject-failure");
+                break;
+            case 9:
+                // Failed to parse the subject public key information
+                arkime_session_add_tag(session, "cert:public-key-failure");
+                break;
+            case 10:
+                // Failed to parse the extensions
+                arkime_session_add_tag(session, "cert:extensions-failure");
+                break;
+            default:
+                // Unknown failure
+                arkime_session_add_tag(session, "cert:unknown-failure");
+                break;
+        }
+
         certinfo_free(fobject);
         break;
     }
